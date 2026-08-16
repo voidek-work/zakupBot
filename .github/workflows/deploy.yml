@@ -94,15 +94,14 @@ jobs:
             echo "🏗️ Building application..."
             npm run build
             
+            # Create logs directory if missing
+            mkdir -p logs
+
             # Restart/Start via PM2
             echo "🤖 Reloading PM2 process..."
-            if npx pm2 describe zakup-bot > /dev/null 2>&1; then
-              npm run pm2:restart
-            else
-              npm run pm2:start
-            fi
+            npx pm2 startOrRestart ecosystem.config.cjs --update-env
             
             # Save PM2 state for system reboot persistence
-            npx pm2 save
+            npx pm2 save || true
             
             echo "✅ Deployment completed successfully!"
