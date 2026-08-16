@@ -237,6 +237,110 @@ export class NotificationService {
       }
     }
   }
+
+  /**
+   * Send Director Approval Notification (When budget or single threshold exceeded)
+   */
+  async notifyDirectorApprovalRequired(
+    bot: Bot<any>,
+    request: Request & { user: User; category: Category },
+    currentSpent: number,
+    budgetLimit: number
+  ) {
+    const directorIds = await this.getDirectorIds();
+    if (directorIds.length === 0) return;
+
+    const estPrice = request.estPrice ? Number(request.estPrice) : 0;
+    const isBudgetExceeded = (currentSpent + estPrice) > budgetLimit;
+
+    const text = [
+      `👑 <b>ТРЕБУЕТСЯ СОГЛАСОВАНИЕ РУКОВОДИТЕЛЯ!</b>`,
+      `━━━━━━━━━━━━━━━━━━━━`,
+      `🏷 <b>Заявка #${request.id}</b> | ${request.urgency === 'URGENT' ? '🚨 СРОЧНО' : '🟡 Планово'}`,
+      `👤 <b>Автор:</b> ${request.user.fullName} (${request.postName || 'Цех'})`,
+      `📦 <b>Товар:</b> <code>${request.itemName}</code> (${request.quantity})`,
+      `💰 <b>Сумма заявки:</b> <b>${estPrice > 0 ? `${estPrice} ₾` : 'Не указана'}</b>`,
+      `🎯 <b>Обоснование:</b> ${request.justification}`,
+      `\n📊 <b>Контроль месячного бюджета:</b>`,
+      `• Текущие траты за месяц: <b>${currentSpent.toLocaleString('ru-RU')} ₾</b>`,
+      `• Лимит бюджета: <b>${budgetLimit.toLocaleString('ru-RU')} ₾</b>`,
+      isBudgetExceeded
+        ? `⚠️ <b>ВНИМАНИЕ:</b> Заявка превышает месячный лимит бюджета (+${(currentSpent + estPrice - budgetLimit).toLocaleString('ru-RU')} ₾)!`
+        : `ℹ️ Сумма заявки превышает порог автоматического согласования.`,
+    ].join('\n');
+
+    const kb = new InlineKeyboard()
+      .text('🟢 Одобрить закупку', `req_approve_${request.id}`)
+      .text('🔴 Отклонить', `req_reject_${request.id}`)
+      .row()
+      .url('💬 Связаться с автором', `tg://user?id=${request.userId}`);
+
+    for (const directorId of directorIds) {
+      try {
+        if (request.photoFileId) {
+          await bot.api.sendPhoto(Number(directorId), request.photoFileId, {
+            caption: text,
+            parse_mode: 'HTML',
+            reply_markup: kb,
+          });
+        } else {
+          await bot.api.sendMessage(Number(directorId), text, {
+            parse_mode: 'HTML',
+            reply_markup: kb,
+          });
+        }
+      } catch (err) {
+        console.error(`❌ Failed to send approval alert to director ${directorId}:`, err);
+      }
+    }
+  }
+
+  /**
+   * Send daily delivery deadline reminder to managers
+   */
+  async sendDeliveryDeadlineReminder(bot: Bot<any>) {
+    const dueOrders = await requestService.getOverdueAndDueTodayOrders();
+    const managerIds = await this.getManagerIds();
+
+    if (managerIds.length === 0 || dueOrders.length === 0) return;
+
+    const listText = dueOrders
+      .map((r, idx) => {
+        const dateStr = r.expectedDate
+          ? new Date(r.expectedDate).toLocaleDateString('ru-RU')
+          : 'сегодня';
+        return `${idx + 1}. <b>#${r.id} ${r.itemName}</b> (${r.quantity}) — Срок: <b>${dateStr}</b> [${r.user.fullName}]`;
+      })
+      .join('\n');
+
+    const text = [
+      `⏰ <b>НАПОМИНАНИЕ ПО ОЖИДАЕМЫМ ДОСТАВКАМ</b>`,
+      `━━━━━━━━━━━━━━━━━━━━`,
+      `Сегодня ожидается / просрочено доставок: <b>${dueOrders.length} шт</b>:`,
+      `\n${listText}`,
+      `\n💡 <i>Проверьте статус у поставщика. Если товар прибыл — отметьте поступление на склад.</i>`,
+    ].join('\n');
+
+    for (const managerId of managerIds) {
+      try {
+        await bot.api.sendMessage(Number(managerId), text, { parse_mode: 'HTML' });
+
+        for (const order of dueOrders.slice(0, 3)) {
+          const kb = new InlineKeyboard()
+            .text('📦 Доставлено на склад', `req_deliver_${order.id}`)
+            .url('💬 Автор', `tg://user?id=${order.userId}`);
+
+          await bot.api.sendMessage(
+            Number(managerId),
+            `📦 <b>Заказ #${order.id}: ${order.itemName} (${order.quantity})</b>\nТовар прибыл в сервис?`,
+            { parse_mode: 'HTML', reply_markup: kb }
+          );
+        }
+      } catch (err) {
+        console.error(`❌ Failed to send deadline reminder to manager ${managerId}:`, err);
+      }
+    }
+  }
 }
 
 export const notificationService = new NotificationService();

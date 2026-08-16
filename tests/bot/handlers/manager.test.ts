@@ -16,6 +16,19 @@ vi.mock('../../../src/db/client.js', () => ({
 vi.mock('../../../src/services/requestService.js', () => ({
   requestService: {
     getManagerRequests: vi.fn(),
+    getCurrentMonthExpenses: vi.fn().mockResolvedValue({
+      totalSpent: 400,
+      totalEstimated: 100,
+      requestsCount: 3,
+      budgetLimit: 900,
+      remainingBudget: 500,
+      isBudgetExceeded: false,
+    }),
+    getExpensesByPost: vi.fn().mockResolvedValue([
+      { postName: 'Слесарный / Подъемник', totalAmount: 400, count: 2 },
+    ]),
+    setMonthlyBudgetLimit: vi.fn().mockResolvedValue(1200),
+    approveRequest: vi.fn().mockResolvedValue({ id: 10, userId: 123456n, itemName: 'Ключ' }),
     takeToWork: vi.fn().mockResolvedValue({ id: 10, userId: 123456n, itemName: 'Ключ динамометрический' }),
     markAsDelivered: vi.fn().mockResolvedValue({ id: 10, itemName: 'Ключ', user: { fullName: 'Мастер' } }),
   },
@@ -76,7 +89,7 @@ describe('Manager & Director Handlers', () => {
     await middleware(ctx, async () => {});
 
     expect(ctx.reply).toHaveBeenCalledWith(
-      expect.stringContaining('СВОДКА РАСХОДОВ И ЗАКУПОК'),
+      expect.stringContaining('СВОДКА РАСХОДОВ И БЮДЖЕТА'),
       expect.objectContaining({ parse_mode: 'HTML' })
     );
 

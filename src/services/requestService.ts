@@ -1,6 +1,7 @@
 import { prisma } from '../db/client.js';
 import { RequestStatus, Urgency, Prisma } from '@prisma/client';
 import { googleSheetsService } from './googleSheetsService.js';
+import { env } from '../config/env.js';
 
 export interface CreateRequestInput {
   userId: bigint;
@@ -17,9 +18,221 @@ export interface CreateRequestInput {
 
 export class RequestService {
   /**
-   * Create a new purchase request
+   * Get current dynamic monthly budget limit in GEL (default 900 ₾)
+   */
+  async getMonthlyBudgetLimit(): Promise<number> {
+    try {
+      const setting = await prisma.setting.findUnique({
+        where: { key: 'monthly_budget_gel' },
+      });
+      if (setting && setting.value) {
+        const val = parseFloat(setting.value);
+        if (!isNaN(val) && val > 0) return val;
+      }
+    } catch {
+      // Fallback
+    }
+    return env.MONTHLY_BUDGET_GEL || 900;
+  }
+
+  /**
+   * Update monthly budget limit in GEL
+   */
+  async setMonthlyBudgetLimit(limit: number): Promise<number> {
+    await prisma.setting.upsert({
+      where: { key: 'monthly_budget_gel' },
+      update: { value: limit.toString() },
+      create: { key: 'monthly_budget_gel', value: limit.toString() },
+    });
+    return limit;
+  }
+
+  /**
+   * Calculate current calendar month spending stats
+   */
+  async getCurrentMonthExpenses(targetDate = new Date()) {
+    const startOfMonth = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1, 0, 0, 0);
+    const endOfMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0, 23, 59, 59);
+
+    const requests = await prisma.request.findMany({
+      where: {
+        createdAt: {
+          gte: startOfMonth,
+          lte: endOfMonth,
+        },
+        status: {
+          not: RequestStatus.REJECTED,
+        },
+      },
+    });
+
+    let totalSpent = 0; // Actual price of ordered + completed
+    let totalEstimated = 0; // Estimated price of pending / new / in_progress
+
+    for (const r of requests) {
+      if (r.status === RequestStatus.ORDERED || r.status === RequestStatus.COMPLETED || r.status === RequestStatus.DELIVERED) {
+        totalSpent += r.actualPrice ? Number(r.actualPrice) : (r.estPrice ? Number(r.estPrice) : 0);
+      } else {
+        totalEstimated += r.estPrice ? Number(r.estPrice) : 0;
+      }
+    }
+
+    const budgetLimit = await this.getMonthlyBudgetLimit();
+    const remainingBudget = Math.max(0, budgetLimit - totalSpent);
+
+    return {
+      totalSpent,
+      totalEstimated,
+      requestsCount: requests.length,
+      budgetLimit,
+      remainingBudget,
+      isBudgetExceeded: totalSpent > budgetLimit,
+    };
+  }
+
+  /**
+   * Get expense breakdown aggregated by workshop post/zone
+   */
+  async getExpensesByPost(targetDate = new Date()) {
+    const startOfMonth = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1, 0, 0, 0);
+    const endOfMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0, 23, 59, 59);
+
+    const requests = await prisma.request.findMany({
+      where: {
+        createdAt: {
+          gte: startOfMonth,
+          lte: endOfMonth,
+        },
+        status: {
+          not: RequestStatus.REJECTED,
+        },
+      },
+    });
+
+    const postStats: Record<string, { totalAmount: number; count: number }> = {};
+
+    for (const r of requests) {
+      const post = r.postName || 'Общий цех';
+      const amount = r.actualPrice ? Number(r.actualPrice) : (r.estPrice ? Number(r.estPrice) : 0);
+
+      if (!postStats[post]) {
+        postStats[post] = { totalAmount: 0, count: 0 };
+      }
+      postStats[post].totalAmount += amount;
+      postStats[post].count += 1;
+    }
+
+    return Object.entries(postStats)
+      .map(([postName, data]) => ({
+        postName,
+        totalAmount: data.totalAmount,
+        count: data.count,
+      }))
+      .sort((a, b) => b.totalAmount - a.totalAmount);
+  }
+
+  /**
+   * Search requests by ID, keyword, item name or post
+   */
+  async searchRequests(query: string, take = 10) {
+    const cleanQuery = query.trim().replace(/^#/, '');
+    const numId = parseInt(cleanQuery, 10);
+
+    if (!isNaN(numId) && numId > 0 && cleanQuery === numId.toString()) {
+      const req = await this.getRequestById(numId);
+      return req ? [req] : [];
+    }
+
+    return prisma.request.findMany({
+      where: {
+        OR: [
+          { itemName: { contains: query, mode: 'insensitive' } },
+          { justification: { contains: query, mode: 'insensitive' } },
+          { postName: { contains: query, mode: 'insensitive' } },
+        ],
+      },
+      include: {
+        user: true,
+        category: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take,
+    });
+  }
+
+  /**
+   * Get orders due today or overdue
+   */
+  async getOverdueAndDueTodayOrders() {
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+
+    return prisma.request.findMany({
+      where: {
+        status: RequestStatus.ORDERED,
+        expectedDate: {
+          lte: endOfToday,
+        },
+      },
+      include: {
+        user: true,
+        category: true,
+      },
+      orderBy: { expectedDate: 'asc' },
+    });
+  }
+
+  /**
+   * Approve request from PENDING_APPROVAL by Director
+   */
+  async approveRequest(requestId: number, directorId: bigint) {
+    const updated = await prisma.request.update({
+      where: { id: requestId },
+      data: { status: RequestStatus.NEW },
+      include: { user: true, category: true },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        requestId,
+        userId: directorId,
+        action: 'APPROVE',
+        oldStatus: RequestStatus.PENDING_APPROVAL,
+        newStatus: RequestStatus.NEW,
+        comment: 'Заявка одобрена руководителем',
+      },
+    });
+
+    googleSheetsService
+      .updateRequest(requestId, { status: RequestStatus.NEW })
+      .catch(console.error);
+
+    return updated;
+  }
+
+  /**
+   * Create a new purchase request (with budget & approval check)
    */
   async createRequest(data: CreateRequestInput) {
+    const budgetLimit = await this.getMonthlyBudgetLimit();
+    const monthStats = await this.getCurrentMonthExpenses();
+    const estPrice = data.estPrice || 0;
+
+    let initialStatus: RequestStatus = RequestStatus.NEW;
+    let auditComment = `Заявка создана. Срочность: ${data.urgency}`;
+
+    if (
+      (monthStats.totalSpent + estPrice) > budgetLimit ||
+      (estPrice > 0 && estPrice >= (env.APPROVAL_THRESHOLD_GEL || 200))
+    ) {
+      initialStatus = RequestStatus.PENDING_APPROVAL;
+      if ((monthStats.totalSpent + estPrice) > budgetLimit) {
+        auditComment = `На согласовании: превышение месячного бюджета (${monthStats.totalSpent + estPrice} ₾ > лимит ${budgetLimit} ₾)`;
+      } else {
+        auditComment = `На согласовании: сумма (${estPrice} ₾) превышает порог согласования (${env.APPROVAL_THRESHOLD_GEL} ₾)`;
+      }
+    }
+
     const request = await prisma.request.create({
       data: {
         userId: data.userId,
@@ -32,7 +245,7 @@ export class RequestService {
         justification: data.justification,
         link: data.link,
         photoFileId: data.photoFileId,
-        status: RequestStatus.NEW,
+        status: initialStatus,
       },
       include: {
         user: true,
@@ -46,8 +259,8 @@ export class RequestService {
         requestId: request.id,
         userId: data.userId,
         action: 'CREATE',
-        newStatus: RequestStatus.NEW,
-        comment: `Заявка создана. Срочность: ${data.urgency}`,
+        newStatus: initialStatus,
+        comment: auditComment,
       },
     });
 

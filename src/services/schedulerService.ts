@@ -37,4 +37,22 @@ export function setupScheduler(bot: Bot<any>) {
       `⚠️ Invalid cron expression for CRON_REGULAR_CHECKLIST: ${env.CRON_REGULAR_CHECKLIST}`
     );
   }
+
+  // 3. Daily delivery deadline reminders (Morning)
+  if (cron.validate(env.CRON_DEADLINE_REMINDER)) {
+    cron.schedule(env.CRON_DEADLINE_REMINDER, async () => {
+      console.log('📢 Running scheduled task: Delivery Deadline Reminders');
+      try {
+        await notificationService.sendDeliveryDeadlineReminder(bot);
+      } catch (err) {
+        console.error('❌ Error during deadline reminder schedule:', err);
+      }
+    });
+    console.log(`  - Deadline Reminders scheduled: "${env.CRON_DEADLINE_REMINDER}"`);
+  } else {
+    console.warn(
+      `⚠️ Invalid cron expression for CRON_DEADLINE_REMINDER: ${env.CRON_DEADLINE_REMINDER}`
+    );
+  }
 }
+

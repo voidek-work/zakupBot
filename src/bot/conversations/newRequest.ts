@@ -4,7 +4,7 @@ import { prisma } from '../../db/client.js';
 import { WORKSHOP_POSTS, URGENCY_LABELS } from '../../config/constants.js';
 import { requestService } from '../../services/requestService.js';
 import { notificationService } from '../../services/notificationService.js';
-import { Urgency } from '@prisma/client';
+import { Urgency, RequestStatus } from '@prisma/client';
 import { getMainKeyboard } from '../keyboards/main.js';
 
 export async function newRequestConversation(
@@ -313,9 +313,9 @@ export async function newRequestConversation(
     return;
   }
 
-  // Save to DB & notify managers
-  const createdRequestId = await conversation.external(async () => {
-    const created = await requestService.createRequest({
+  // Save to DB & notify managers / director
+  const created = await conversation.external(async () => {
+    const req = await requestService.createRequest({
       userId,
       categoryId: selectedCategory.id,
       postName: selectedPost,
@@ -328,18 +328,34 @@ export async function newRequestConversation(
       photoFileId,
     });
 
-    // Send alerts
-    await notificationService.notifyNewRequest(ctx.api as any, created as any).catch(console.error);
+    if (req.status === RequestStatus.PENDING_APPROVAL) {
+      const monthStats = await requestService.getCurrentMonthExpenses();
+      await notificationService
+        .notifyDirectorApprovalRequired(ctx.api as any, req as any, monthStats.totalSpent, monthStats.budgetLimit)
+        .catch(console.error);
+    } else {
+      await notificationService.notifyNewRequest(ctx.api as any, req as any).catch(console.error);
+    }
 
-    return created.id;
+    return req;
   });
 
-  await finalCtx.editMessageText(
-    `✅ <b>Заявка #${createdRequestId} успешно создана и передана завхозу!</b>\n\n${
-      urgency === Urgency.URGENT
-        ? '🚨 Завхоз получил мгновенное оповещение со звуком.'
-        : '🟡 Заявка добавлена в плановый список закупок на неделю.'
-    }\n\nВы получите уведомление в боте, когда статус заявки изменится.`,
-    { parse_mode: 'HTML' }
-  );
+  if (created.status === RequestStatus.PENDING_APPROVAL) {
+    await finalCtx.editMessageText(
+      `⏳ <b>Заявка #${created.id} создана и направлена на согласование Директору!</b>\n\n` +
+        `ℹ️ Сумма закупки или текущий месячный лимит бюджета (900 ₾) требует одобрения руководства.\n` +
+        `Как только директор одобрит закупку, завхоз сразу возьмет её в работу.`,
+      { parse_mode: 'HTML' }
+    );
+  } else {
+    await finalCtx.editMessageText(
+      `✅ <b>Заявка #${created.id} успешно создана и передана завхозу!</b>\n\n${
+        urgency === Urgency.URGENT
+          ? '🚨 Завхоз получил мгновенное оповещение со звуком.'
+          : '🟡 Заявка добавлена в плановый список закупок на неделю.'
+      }\n\nВы получите уведомление в боте, когда статус заявки изменится.`,
+      { parse_mode: 'HTML' }
+    );
+  }
 }
+

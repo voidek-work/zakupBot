@@ -37,8 +37,13 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((val) => (val ? val.replace(/\\n/g, '\n') : undefined)),
+  MONTHLY_BUDGET_GEL: z
+    .string()
+    .optional()
+    .transform((val) => (val && !isNaN(parseFloat(val)) ? parseFloat(val) : 900)),
   CRON_WEEKLY_DIGEST: z.string().default('0 10 * * 1'),
   CRON_REGULAR_CHECKLIST: z.string().default('0 16 * * 5'),
+  CRON_DEADLINE_REMINDER: z.string().default('0 10 * * *'),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -50,6 +55,7 @@ export const env = parsed.success
         parsed.data.APPROVAL_THRESHOLD_GEL ??
         parsed.data.APPROVAL_THRESHOLD_RUB ??
         200,
+      MONTHLY_BUDGET_GEL: parsed.data.MONTHLY_BUDGET_GEL ?? 900,
     }
   : {
       BOT_TOKEN: process.env.BOT_TOKEN || '',
@@ -61,10 +67,12 @@ export const env = parsed.success
           process.env.APPROVAL_THRESHOLD_RUB ||
           '200'
       ) || 200,
+      MONTHLY_BUDGET_GEL: parseFloat(process.env.MONTHLY_BUDGET_GEL || '900') || 900,
       GOOGLE_SPREADSHEET_ID: process.env.GOOGLE_SPREADSHEET_ID,
       GOOGLE_SERVICE_ACCOUNT_EMAIL: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
       GOOGLE_PRIVATE_KEY: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
       CRON_WEEKLY_DIGEST: process.env.CRON_WEEKLY_DIGEST || '0 10 * * 1',
       CRON_REGULAR_CHECKLIST: process.env.CRON_REGULAR_CHECKLIST || '0 16 * * 5',
+      CRON_DEADLINE_REMINDER: process.env.CRON_DEADLINE_REMINDER || '0 10 * * *',
     };
 

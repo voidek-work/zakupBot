@@ -251,8 +251,16 @@ managerHandlers.hears('📋 Все заявки', async (ctx) => {
   await ctx.reply(text, { parse_mode: 'HTML' });
 });
 
-// Director: Expense summary
+function renderProgressBar(spent: number, total: number, length = 10): string {
+  const ratio = Math.min(spent / (total || 1), 1);
+  const filled = Math.round(ratio * length);
+  const empty = Math.max(0, length - filled);
+  return '█'.repeat(filled) + '░'.repeat(empty);
+}
+
+// Director: Expense summary with monthly budget
 managerHandlers.hears('📊 Сводка расходов', async (ctx) => {
+  const monthStats = await requestService.getCurrentMonthExpenses();
   const completed = await requestService.getManagerRequests({
     status: RequestStatus.COMPLETED,
     take: 50,
@@ -271,16 +279,147 @@ managerHandlers.hears('📊 Сводка расходов', async (ctx) => {
     0
   );
 
+  const percent = Math.round((monthStats.totalSpent / (monthStats.budgetLimit || 1)) * 100);
+  const bar = renderProgressBar(monthStats.totalSpent, monthStats.budgetLimit);
+
   const text = [
-    `📊 <b>СВОДКА РАСХОДОВ И ЗАКУПОК</b>`,
+    `📊 <b>СВОДКА РАСХОДОВ И БЮДЖЕТА</b>`,
     `━━━━━━━━━━━━━━━━━━━━`,
-    `✅ <b>Выполненные закупки:</b> ${completed.length} шт на сумму <b>${totalCompletedSum.toLocaleString('ru-RU')} ₾</b>`,
-    `🛒 <b>Заказы в пути/ожидании:</b> ${ordered.length} шт на сумму <b>${totalOrderedSum.toLocaleString('ru-RU')} ₾</b>`,
-    `💰 <b>Общий оборот:</b> <b>${(totalCompletedSum + totalOrderedSum).toLocaleString('ru-RU')} ₾</b>`,
-    `\n📋 <i>Детальные отчеты доступны в синхронизированной Google Таблице.</i>`,
+    `💰 <b>Месячный бюджет цеха:</b> <b>${monthStats.budgetLimit.toLocaleString('ru-RU')} ₾</b>`,
+    `• Израсходовано: <b>${monthStats.totalSpent.toLocaleString('ru-RU')} ₾</b> (${percent}%)`,
+    `• Остаток бюджета: <b>${monthStats.remainingBudget.toLocaleString('ru-RU')} ₾</b>`,
+    `<code>[${bar}] ${percent}%</code>`,
+    monthStats.isBudgetExceeded ? `\n⚠️ <b>Лимит превышен! Все новые заявки идут на согласование.</b>` : '',
+    `\n📦 <b>Статистика по заявкам:</b>`,
+    `• Выполненные закупки: ${completed.length} шт на <b>${totalCompletedSum.toLocaleString('ru-RU')} ₾</b>`,
+    `• Заказы в пути/ожидании: ${ordered.length} шт на <b>${totalOrderedSum.toLocaleString('ru-RU')} ₾</b>`,
+    `• Общий оборот закупки: <b>${(totalCompletedSum + totalOrderedSum).toLocaleString('ru-RU')} ₾</b>`,
+    `\n📋 <i>Детальные отчеты доступны в Google Таблице.</i>`,
+  ].filter(Boolean).join('\n');
+
+  const kb = new InlineKeyboard()
+    .text('🏢 Расходы по постам', 'open_post_expenses')
+    .text('⚙️ Изменить бюджет', 'open_budget_settings');
+
+  await ctx.reply(text, {
+    parse_mode: 'HTML',
+    reply_markup: kb,
+  });
+});
+
+// Post / Zone expenses breakdown
+managerHandlers.hears('🏢 Расходы по постам', async (ctx) => {
+  await sendPostExpenses(ctx);
+});
+
+managerHandlers.callbackQuery('open_post_expenses', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await sendPostExpenses(ctx);
+});
+
+async function sendPostExpenses(ctx: BotContext) {
+  const stats = await requestService.getExpensesByPost();
+  const totalAmount = stats.reduce((acc, s) => acc + s.totalAmount, 0);
+
+  if (stats.length === 0) {
+    await ctx.reply('🏢 <b>Расходы по постам:</b> пока нет оформленных заявок в этом месяце.', {
+      parse_mode: 'HTML',
+    });
+    return;
+  }
+
+  const lines = stats.map((s, idx) => {
+    const pct = totalAmount > 0 ? Math.round((s.totalAmount / totalAmount) * 100) : 0;
+    return `${idx + 1}. <b>${s.postName}</b>: <b>${s.totalAmount.toLocaleString('ru-RU')} ₾</b> (${pct}%, ${s.count} шт)`;
+  });
+
+  const text = [
+    `🏢 <b>АНАЛИТИКА РАСХОДОВ ПО ПОСТАМ И ЗОНАМ</b>`,
+    `━━━━━━━━━━━━━━━━━━━━`,
+    `Суммарные траты за текущий месяц: <b>${totalAmount.toLocaleString('ru-RU')} ₾</b>`,
+    `\n${lines.join('\n')}`,
+    `\n💡 <i>Статистика строится на основе фактически заказанных и подтвержденных позиций.</i>`,
   ].join('\n');
 
   await ctx.reply(text, { parse_mode: 'HTML' });
+}
+
+// Budget management
+managerHandlers.hears('⚙️ Бюджет цеха', async (ctx) => {
+  await sendBudgetMenu(ctx);
+});
+
+managerHandlers.callbackQuery('open_budget_settings', async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await sendBudgetMenu(ctx);
+});
+
+async function sendBudgetMenu(ctx: BotContext) {
+  const stats = await requestService.getCurrentMonthExpenses();
+  const bar = renderProgressBar(stats.totalSpent, stats.budgetLimit);
+  const percent = Math.round((stats.totalSpent / (stats.budgetLimit || 1)) * 100);
+
+  const text = [
+    `⚙️ <b>УПРАВЛЕНИЕ МЕСЯЧНЫМ БЮДЖЕТОМ</b>`,
+    `━━━━━━━━━━━━━━━━━━━━`,
+    `Текущий установленный лимит: <b>${stats.budgetLimit.toLocaleString('ru-RU')} ₾</b>`,
+    `Траты за текущий месяц: <b>${stats.totalSpent.toLocaleString('ru-RU')} ₾</b> (${percent}%)`,
+    `Остаток доступных средств: <b>${stats.remainingBudget.toLocaleString('ru-RU')} ₾</b>`,
+    `<code>[${bar}] ${percent}%</code>`,
+    `\n<i>При превышении установленного лимита все последующие заявки мастеров автоматически перенаправляются на согласование директору.</i>`,
+    `\nВыберите новый лимит бюджета на месяц:`,
+  ].join('\n');
+
+  const kb = new InlineKeyboard()
+    .text('600 ₾', 'set_budget_600')
+    .text('900 ₾ (Стандарт)', 'set_budget_900')
+    .text('1 200 ₾', 'set_budget_1200')
+    .row()
+    .text('1 500 ₾', 'set_budget_1500')
+    .text('2 000 ₾', 'set_budget_2000')
+    .text('3 000 ₾', 'set_budget_3000');
+
+  await ctx.reply(text, {
+    parse_mode: 'HTML',
+    reply_markup: kb,
+  });
+}
+
+// Change budget limit callback
+managerHandlers.callbackQuery(/^set_budget_(\d+)$/, async (ctx) => {
+  const newLimit = parseInt(ctx.match[1], 10);
+  await requestService.setMonthlyBudgetLimit(newLimit);
+
+  await ctx.answerCallbackQuery({ text: `Бюджет обновлен: ${newLimit} ₾` });
+  await ctx.editMessageText(
+    `✅ <b>Месячный бюджет успешно изменен на ${newLimit.toLocaleString('ru-RU')} ₾!</b>\nТеперь лимит перерасхода для согласования равен ${newLimit} ₾.`,
+    { parse_mode: 'HTML' }
+  );
+});
+
+// Director: Approve request
+managerHandlers.callbackQuery(/^req_approve_(\d+)$/, async (ctx) => {
+  const requestId = parseInt(ctx.match[1], 10);
+  const directorId = BigInt(ctx.from.id);
+
+  const updated = await requestService.approveRequest(requestId, directorId);
+  await ctx.answerCallbackQuery({ text: `Заявка #${requestId} одобрена!` });
+
+  await ctx.editMessageText(
+    `✅ <b>Заявка #${requestId} (${updated.itemName}) ОДОБРЕНА директором!</b>\nЗаявка передана завхозу в работу.`,
+    { parse_mode: 'HTML' }
+  );
+
+  // Notify author
+  try {
+    await ctx.api.sendMessage(
+      Number(updated.userId),
+      `🎉 <b>Заявка #${requestId} (${updated.itemName}) ОДОБРЕНА руководителем!</b>\nЗавхоз приступает к закупке.`,
+      { parse_mode: 'HTML' }
+    );
+  } catch (err) {
+    console.error('Failed to notify author on approval:', err);
+  }
 });
 
 // Director: Approval requests
@@ -303,7 +442,7 @@ managerHandlers.hears('📥 Заявки на согласование', async (
 
   for (const req of pending) {
     const kb = new InlineKeyboard()
-      .text('🟢 Одобрить', `req_take_${req.id}`)
+      .text('🟢 Одобрить', `req_approve_${req.id}`)
       .text('🔴 Отклонить', `req_reject_${req.id}`)
       .row()
       .url('💬 Автор', `tg://user?id=${req.userId}`);
@@ -322,3 +461,4 @@ managerHandlers.hears('📥 Заявки на согласование', async (
     });
   }
 });
+

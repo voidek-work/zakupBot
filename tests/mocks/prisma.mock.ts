@@ -24,7 +24,7 @@ export function createPrismaMock() {
     request: {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
-      findMany: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
@@ -42,6 +42,10 @@ export function createPrismaMock() {
     auditLog: {
       create: vi.fn(),
       findMany: vi.fn(),
+    },
+    setting: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn(),
     },
   };
 }

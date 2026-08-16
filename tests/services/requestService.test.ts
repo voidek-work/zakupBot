@@ -45,6 +45,10 @@ const { prismaMock } = vi.hoisted(() => ({
       create: vi.fn(),
       findMany: vi.fn(),
     },
+    setting: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn(),
+    },
   },
 }));
 
@@ -67,6 +71,8 @@ describe('RequestService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    prismaMock.request.findMany.mockResolvedValue([]);
+    prismaMock.setting.findUnique.mockResolvedValue(null);
     requestService = new RequestService();
   });
 
