@@ -57,6 +57,21 @@ jobs:
           script: |
             echo "🚀 Starting deployment on remote server..."
             
+            # Load environment (NVM, profile, and standard PATHs for non-interactive SSH sessions)
+            export PATH=$PATH:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.local/bin
+            if [ -s "$HOME/.nvm/nvm.sh" ]; then
+              export NVM_DIR="$HOME/.nvm"
+              \. "$HOME/.nvm/nvm.sh"
+            elif [ -s "/root/.nvm/nvm.sh" ]; then
+              export NVM_DIR="/root/.nvm"
+              \. "/root/.nvm/nvm.sh"
+            fi
+            [ -s "$HOME/.bashrc" ] && source "$HOME/.bashrc" || true
+            [ -s "$HOME/.profile" ] && source "$HOME/.profile" || true
+
+            echo "🟢 Node version: $(node -v 2>/dev/null || echo 'Not in standard path')"
+            echo "🟢 NPM version: $(npm -v 2>/dev/null || echo 'Not in standard path')"
+            
             # Navigate to project directory
             cd ${{ secrets.PROJECT_PATH || '/var/www/zakupBot' }}
             
