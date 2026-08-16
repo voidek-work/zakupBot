@@ -285,7 +285,7 @@ managerHandlers.hears('📊 Сводка расходов', async (ctx) => {
   const text = [
     `📊 <b>СВОДКА РАСХОДОВ И БЮДЖЕТА</b>`,
     `━━━━━━━━━━━━━━━━━━━━`,
-    `💰 <b>Месячный бюджет цеха:</b> <b>${monthStats.budgetLimit.toLocaleString('ru-RU')} ₾</b>`,
+    `💰 <b>Общий месячный бюджет:</b> <b>${monthStats.budgetLimit.toLocaleString('ru-RU')} ₾</b>`,
     `• Израсходовано: <b>${monthStats.totalSpent.toLocaleString('ru-RU')} ₾</b> (${percent}%)`,
     `• Остаток бюджета: <b>${monthStats.remainingBudget.toLocaleString('ru-RU')} ₾</b>`,
     `<code>[${bar}] ${percent}%</code>`,
@@ -345,7 +345,7 @@ async function sendPostExpenses(ctx: BotContext) {
 }
 
 // Budget management
-managerHandlers.hears('⚙️ Бюджет цеха', async (ctx) => {
+managerHandlers.hears(['⚙️ Общий бюджет', '⚙️ Бюджет цеха'], async (ctx) => {
   await sendBudgetMenu(ctx);
 });
 
@@ -360,14 +360,14 @@ async function sendBudgetMenu(ctx: BotContext) {
   const percent = Math.round((stats.totalSpent / (stats.budgetLimit || 1)) * 100);
 
   const text = [
-    `⚙️ <b>УПРАВЛЕНИЕ МЕСЯЧНЫМ БЮДЖЕТОМ</b>`,
+    `⚙️ <b>УПРАВЛЕНИЕ ОБЩИМ БЮДЖЕТОМ</b>`,
     `━━━━━━━━━━━━━━━━━━━━`,
     `Текущий установленный лимит: <b>${stats.budgetLimit.toLocaleString('ru-RU')} ₾</b>`,
     `Траты за текущий месяц: <b>${stats.totalSpent.toLocaleString('ru-RU')} ₾</b> (${percent}%)`,
     `Остаток доступных средств: <b>${stats.remainingBudget.toLocaleString('ru-RU')} ₾</b>`,
     `<code>[${bar}] ${percent}%</code>`,
-    `\n<i>При превышении установленного лимита все последующие заявки мастеров автоматически перенаправляются на согласование директору.</i>`,
-    `\nВыберите новый лимит бюджета на месяц:`,
+    `\n<i>При превышении установленного лимита все последующие заявки сотрудников автоматически перенаправляются на согласование директору.</i>`,
+    `\nВыберите новый лимит общего бюджета на месяц:`,
   ].join('\n');
 
   const kb = new InlineKeyboard()

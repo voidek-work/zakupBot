@@ -12,7 +12,7 @@ export function getMainKeyboard(role: Role): Keyboard {
   } else if (role === 'DIRECTOR') {
     kb.text('➕ Создать заявку').text('📊 Сводка расходов').row()
       .text('📥 Заявки на согласование').text('🏢 Расходы по постам').row()
-      .text('⚙️ Бюджет цеха').text('🔍 Поиск заявки').row()
+      .text('⚙️ Общий бюджет').text('🔍 Поиск заявки').row()
       .text('📋 Все заявки').text('👤 Мой профиль');
   } else {
     // Mechanic / Master
