@@ -343,7 +343,7 @@ export async function newRequestConversation(
   if (created.status === RequestStatus.PENDING_APPROVAL) {
     await finalCtx.editMessageText(
       `⏳ <b>Заявка #${created.id} создана и направлена на согласование Директору!</b>\n\n` +
-        `ℹ️ Сумма закупки или текущий месячный лимит бюджета (900 ₾) требует одобрения руководства.\n` +
+        `ℹ️ Заявка требует согласования с руководством.\n` +
         `Как только директор одобрит закупку, завхоз сразу возьмет её в работу.`,
       { parse_mode: 'HTML' }
     );
