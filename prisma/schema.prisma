@@ -1,0 +1,112 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  MECHANIC
+  MANAGER
+  DIRECTOR
+}
+
+enum Urgency {
+  URGENT
+  PLANNED
+}
+
+enum RequestStatus {
+  NEW
+  PENDING_APPROVAL
+  IN_PROGRESS
+  ORDERED
+  DELIVERED
+  COMPLETED
+  REJECTED
+}
+
+model User {
+  id        BigInt     @id // Telegram User ID
+  username  String?
+  fullName  String
+  role      Role       @default(MECHANIC)
+  postName  String?    // e.g. "Пост 1", "Пост 2", "Агрегатка", "Диагностика", "Приемка"
+  isActive  Boolean    @default(true)
+  requests  Request[]
+  auditLogs AuditLog[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@map("users")
+}
+
+model Category {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  icon      String
+  sortOrder Int       @default(0)
+  requests  Request[]
+
+  @@map("categories")
+}
+
+model Request {
+  id             Int           @id @default(autoincrement())
+  userId         BigInt
+  user           User          @relation(fields: [userId], references: [id])
+  categoryId     Int
+  category       Category      @relation(fields: [categoryId], references: [id])
+  postName       String?
+  itemName       String
+  quantity       String
+  estPrice       Decimal?      @db.Decimal(10, 2)
+  actualPrice    Decimal?      @db.Decimal(10, 2)
+  urgency        Urgency       @default(PLANNED)
+  justification  String
+  link           String?
+  photoFileId    String?
+  receiptFileId  String?
+  status         RequestStatus @default(NEW)
+  rejectReason   String?
+  expectedDate   DateTime?
+  deliveredAt    DateTime?
+  completedAt    DateTime?
+  googleRowIndex Int?
+  auditLogs      AuditLog[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@map("requests")
+}
+
+model RegularItem {
+  id              Int      @id @default(autoincrement())
+  name            String
+  category        String   // "Химия/Масла", "Расходники", "Быт/Гигиена", "Кофе/Чай"
+  defaultQuantity String   // e.g. "12", "5", "2"
+  unit            String   // "шт", "баллон", "пачка", "коробка", "канистра", "кг"
+  minStock        Int      @default(1)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("regular_items")
+}
+
+model AuditLog {
+  id         Int            @id @default(autoincrement())
+  requestId  Int
+  request    Request        @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  userId     BigInt
+  user       User           @relation(fields: [userId], references: [id])
+  action     String         // "CREATE", "STATUS_CHANGE", "REJECT", "DELIVER"
+  oldStatus  RequestStatus?
+  newStatus  RequestStatus?
+  comment    String?
+  createdAt  DateTime       @default(now())
+
+  @@map("audit_logs")
+}
