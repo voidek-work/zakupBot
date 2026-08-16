@@ -85,9 +85,10 @@ jobs:
             npm ci
             
             # Generate Prisma Client & Push DB schema changes
-            echo "🗄️ Updating Prisma database schema..."
+            echo "🗄️ Updating Prisma database schema & seeds..."
             npx prisma generate
             npx prisma db push --skip-generate
+            npm run prisma:seed
             
             # Build TypeScript to production bundle
             echo "🏗️ Building application..."
